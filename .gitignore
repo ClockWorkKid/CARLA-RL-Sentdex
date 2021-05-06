@@ -3,4 +3,4 @@
 __pycache__
 models/
 logs/
-env
+env/

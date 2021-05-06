@@ -11,7 +11,6 @@ from keras.applications.xception import Xception
 from keras.layers import Dense, GlobalAveragePooling2D
 from keras.optimizers import Adam
 from keras.models import Model
-from keras.callbacks import TensorBoard
 
 import tensorflow as tf
 import keras.backend.tensorflow_backend as backend
@@ -53,39 +52,6 @@ EPSILON_DECAY = 0.95 ## 0.9975 99975
 MIN_EPSILON = 0.001
 
 AGGREGATE_STATS_EVERY = 10
-
-
-# Own Tensorboard class
-class ModifiedTensorBoard(TensorBoard):
-
-    # Overriding init to set initial step and writer (we want one log file for all .fit() calls)
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.step = 1
-        self.writer = tf.summary.FileWriter(self.log_dir)
-
-    # Overriding this method to stop creating default log writer
-    def set_model(self, model):
-        pass
-
-    # Overrided, saves logs with our step number
-    # (otherwise every .fit() will start writing from 0th step)
-    def on_epoch_end(self, epoch, logs=None):
-        self.update_stats(**logs)
-
-    # Overrided
-    # We train for one batch only, no need to save anything at epoch end
-    def on_batch_end(self, batch, logs=None):
-        pass
-
-    # Overrided, so won't close writer
-    def on_train_end(self, _):
-        pass
-
-    # Custom method for saving own metrics
-    # Creates writer, writes custom metrics and closes writer
-    def update_stats(self, **stats):
-        self._write_logs(stats, self.step)
 
 
 class CarEnv:
@@ -189,9 +155,9 @@ class DQNAgent:
 
         self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
 
-        self.tensorboard = ModifiedTensorBoard(log_dir=f"logs/{MODEL_NAME}-{int(time.time())}")
         self.target_update_counter = 0
         self.graph = tf.get_default_graph()
+        self.step = 0
 
         self.terminate = False
         self.last_logged_episode = 0
@@ -243,13 +209,12 @@ class DQNAgent:
             y.append(current_qs)
 
         log_this_step = False
-        if self.tensorboard.step > self.last_logged_episode:
+        if self.step > self.last_logged_episode:
             log_this_step = True
-            self.last_log_episode = self.tensorboard.step
+            self.last_log_episode = self.step
 
         with self.graph.as_default():
-            self.model.fit(np.array(X)/255, np.array(y), batch_size=TRAINING_BATCH_SIZE, verbose=0, shuffle=False, callbacks=[self.tensorboard] if log_this_step else None)
-
+            self.model.fit(np.array(X)/255, np.array(y), batch_size=TRAINING_BATCH_SIZE, verbose=0, shuffle=False)
 
         if log_this_step:
             self.target_update_counter += 1
@@ -265,7 +230,7 @@ class DQNAgent:
         X = np.random.uniform(size=(1, IM_HEIGHT, IM_WIDTH, 3)).astype(np.float32)
         y = np.random.uniform(size=(1, 3)).astype(np.float32)
         with self.graph.as_default():
-            self.model.fit(X,y, verbose=False, batch_size=1)
+            self.model.fit(X, y, verbose=False, batch_size=1)
 
         self.training_initialized = True
 
@@ -318,7 +283,7 @@ if __name__ == '__main__':
             env.collision_hist = []
 
             # Update tensorboard step every episode
-            agent.tensorboard.step = episode
+            agent.step = episode
 
             # Restarting episode - reset episode reward and step number
             episode_reward = 0
@@ -368,7 +333,6 @@ if __name__ == '__main__':
                 average_reward = sum(ep_rewards[-AGGREGATE_STATS_EVERY:])/len(ep_rewards[-AGGREGATE_STATS_EVERY:])
                 min_reward = min(ep_rewards[-AGGREGATE_STATS_EVERY:])
                 max_reward = max(ep_rewards[-AGGREGATE_STATS_EVERY:])
-                agent.tensorboard.update_stats(reward_avg=average_reward, reward_min=min_reward, reward_max=max_reward, epsilon=epsilon)
 
                 # Save model, but only when min reward is greater or equal a set value
                 if min_reward >= MIN_REWARD:
@@ -383,4 +347,3 @@ if __name__ == '__main__':
     # Set termination flag for training thread and wait for it to finish
     agent.terminate = True
     trainer_thread.join()
-    agent.model.save(f'models/{MODEL_NAME}__{max_reward:_>7.2f}max_{average_reward:_>7.2f}avg_{min_reward:_>7.2f}min__{int(time.time())}.model')
