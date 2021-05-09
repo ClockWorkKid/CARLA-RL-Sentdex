@@ -37,16 +37,21 @@ PREDICTION_BATCH_SIZE = 1
 TRAINING_BATCH_SIZE = MINIBATCH_SIZE // 4
 UPDATE_TARGET_EVERY = 5
 MODEL_NAME = "Custom"
+LAST_CHECKPOINT = 0
+CHECKPOINT_INTERVAL = 20*60
+MODEL_CHECKPOINT = "models/Custom__-866.80reward_1620454401.pt"
+LOAD_CHECKPOINT = True
 
 MEMORY_FRACTION = 0.8
-MIN_REWARD = -100
 
 EPISODES = 5000
 
 DISCOUNT = 0.99
-epsilon = 0.9
+epsilon = 0.6
 EPSILON_DECAY = 0.95 ## 0.9975 99975
 MIN_EPSILON = 0.001
+
+
 
 AGGREGATE_STATS_EVERY = 10
 
@@ -126,11 +131,11 @@ class CarEnv:
 
     def step(self, action):
         if action == 0:
-            self.vehicle.apply_control(carla.VehicleControl(throttle=.5, steer=-0.5))
+            self.vehicle.apply_control(carla.VehicleControl(throttle=0.5, steer=-0.3))
         elif action == 1:
             self.vehicle.apply_control(carla.VehicleControl(throttle=0.5, steer= 0))
         elif action == 2:
-            self.vehicle.apply_control(carla.VehicleControl(throttle=0.5, steer=0.5))
+            self.vehicle.apply_control(carla.VehicleControl(throttle=0.5, steer=0.3))
 
         # v = self.vehicle.get_velocity()
         # kmh = int(3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2))
@@ -140,8 +145,8 @@ class CarEnv:
             reward = -1000
             done = True
         elif self.lane_hist > 0:
+            reward = -100 * self.lane_hist
             self.lane_hist = 0
-            reward = -100
         else:
             reward = 0.2
 
@@ -328,6 +333,10 @@ if __name__ == '__main__':
     agent = DQNAgent()
     env = CarEnv()
 
+    if LOAD_CHECKPOINT is True:
+        agent.model.load_state_dict(torch.load(MODEL_CHECKPOINT))
+        agent.target_model.load_state_dict(agent.model.state_dict())
+
     # Start training thread and wait for training to be initialized
     trainer_thread = Thread(target=agent.train_in_loop, daemon=True)
     trainer_thread.start()
@@ -404,8 +413,10 @@ if __name__ == '__main__':
         #     min_rewards.append(min_reward)
 
         # Save model, but only when min reward is greater or equal a set value
-        if episode_reward >= agent.best_reward:
-            agent.best_reward = episode_reward
+        if episode_reward >= agent.best_reward or (time.time() - LAST_CHECKPOINT) > CHECKPOINT_INTERVAL:
+            LAST_CHECKPOINT = time.time()
+            if episode_reward >= agent.best_reward:
+                agent.best_reward = episode_reward
             torch.save(agent.model.state_dict(),
                        f'models/{MODEL_NAME}__{episode_reward:_>7.2f}reward_{int(time.time())}.pt')
 
